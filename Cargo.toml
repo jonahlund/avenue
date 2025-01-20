@@ -1,56 +1,19 @@
 [workspace]
-members = ["macros", "examples/*"]
+members = ["web"]
+resolver = "2"
 
 [package]
 name = "avenue"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [features]
-default = ["fs", "compress-full", "minify-full"]
-fs = ["dep:mime_guess"]
-tracing = ["dep:tracing"]
-
-# Compression
-compress-full = [
-  "compress-br",
-  "compress-deflate",
-  "compress-gzip",
-  "compress-zstd",
-]
-compress-br = ["dep:brotli"]
-compress-deflate = ["dep:flate2"]
-compress-gzip = ["dep:flate2"]
-compress-zstd = ["dep:zstd"]
-
-# Minifiaction
-minify-full = [
-  "minify-js",
-  "minify-css",
-  "minify-html",
-  "minify-json",
-  "minify-xml",
-]
-minify-js = ["dep:minify-js"]
-minify-css = ["dep:lightningcss"]
-minify-html = ["dep:minify-html"]
-minify-json = ["dep:serde", "dep:serde_json"]
-minify-xml = ["dep:quick-xml"]
+default = ["std", "mime"]
+std = []
+mime = ["std", "dep:mime", "dep:mime_guess"]
+either = ["dep:either"]
 
 [dependencies]
-anyhow = "1.0.94"
-bytes = "1.9.0"
-mime = "0.3.17"
-
-# Optional
-lightningcss = { version = "1.0.0-alpha.61", optional = true }
-minify-html = { version = "0.15.0", optional = true }
-minify-js = { version = "0.6.0", optional = true }
-serde_json = { version = "1.0.133", optional = true }
-serde = { version = "1.0.216", optional = true }
-quick-xml = { version = "0.37.1", optional = true, features = ["serde"] }
+either = { version = "1.13.0", optional = true }
+mime = { version = "0.3.17", optional = true }
 mime_guess = { version = "2.0.5", optional = true }
-brotli = { version = "7.0.0", optional = true }
-zstd = { version = "0.13.2", optional = true }
-flate2 = { version = "1.0.35", optional = true }
-tracing = { version = "0.1.41", optional = true }
