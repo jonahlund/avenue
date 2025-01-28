@@ -5,7 +5,7 @@ extern crate alloc;
 extern crate std;
 
 use alloc::{borrow::Cow, boxed::Box, string::String, vec::Vec};
-use core::{convert::Infallible, error::Error};
+use core::{convert::Infallible, error::Error, mem};
 
 pub type BoxError = Box<dyn Error>;
 
@@ -19,7 +19,7 @@ pub trait Process {
 pub trait ProcessRead {
     type Error: Into<BoxError>;
 
-    fn process_read(&mut self) -> Result<usize, Self::Error>;
+    fn process_read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error>;
 }
 
 pub trait AssetExt {
@@ -32,7 +32,7 @@ pub trait AssetExt {
     fn size_hint(&self) -> Option<usize>;
 }
 
-macro_rules! impl_forward {
+macro_rules! impl_move {
     ($($ty:ty)+) => {
         $(
             impl Process for $ty {
@@ -48,7 +48,7 @@ macro_rules! impl_forward {
     }
 }
 
-impl_forward!(String &str Vec<u8> &[u8]);
+impl_move!(String &str Vec<u8> &[u8]);
 
 impl<T: Process> Process for Box<T> {
     type Error = T::Error;
@@ -73,35 +73,44 @@ impl Process for std::fs::File {
     }
 }
 
-#[cfg(feature = "std")]
-pub struct BufAsset<'p, 'c> {
-    pub path: Cow<'p, std::path::Path>,
+#[derive(Debug, Clone)]
+pub struct BufAsset<'c, K> {
+    /// A key identifying this asset.
+    ///
+    /// This will typically be a relative logical path for the asset, but it
+    /// could be anything.
+    pub key: K,
+    /// The asset contents.
     pub contents: Cow<'c, [u8]>,
 }
 
-#[cfg(feature = "std")]
-impl<'p, 'c> BufAsset<'p, 'c> {
+impl<'c, K> BufAsset<'c, K> {
     #[inline]
-    pub fn new<P: Into<Cow<'p, std::path::Path>>, C: Into<Cow<'c, [u8]>>>(
-        path: P,
-        contents: C,
-    ) -> Self {
+    pub fn new<C: Into<Cow<'c, [u8]>>>(key: K, contents: C) -> Self {
         Self {
-            path: path.into(),
+            key,
             contents: contents.into(),
         }
     }
+
+    #[cfg(feature = "std")]
+    pub fn into_file<'p, P: Into<Cow<'p, std::path::Path>>>(
+        self,
+        path: P,
+    ) -> std::io::Result<FileAsset<'p, K>> {
+        let path = path.into();
+        std::fs::write(&path, self.contents)?;
+        Ok(FileAsset::new(self.key, path))
+    }
 }
 
-#[cfg(feature = "std")]
-impl AsRef<[u8]> for BufAsset<'_, '_> {
+impl<K> AsRef<[u8]> for BufAsset<'_, K> {
     fn as_ref(&self) -> &[u8] {
         &self.contents
     }
 }
 
-#[cfg(feature = "std")]
-impl<'p, 'c> Process for BufAsset<'p, 'c> {
+impl<'c, K> Process for BufAsset<'c, K> {
     type Error = Infallible;
     type Output = Cow<'c, [u8]>;
 
@@ -112,16 +121,19 @@ impl<'p, 'c> Process for BufAsset<'p, 'c> {
 }
 
 #[cfg(feature = "std")]
-impl AssetExt for BufAsset<'_, '_> {
+impl<K> AssetExt for BufAsset<'_, K>
+where
+    K: AsRef<std::path::Path>,
+{
     #[cfg(feature = "mime")]
     #[inline]
     fn mime(&self) -> Option<mime::Mime> {
-        mime_guess::MimeGuess::from_path(&self.path).first()
+        mime_guess::MimeGuess::from_path(&self.key).first()
     }
 
     #[inline]
     fn path(&self) -> Option<&std::path::Path> {
-        Some(&self.path)
+        Some(self.key.as_ref())
     }
 
     #[inline]
@@ -131,20 +143,40 @@ impl AssetExt for BufAsset<'_, '_> {
 }
 
 #[cfg(feature = "std")]
-pub struct FileAsset<'p> {
+#[derive(Debug, Clone)]
+pub struct FileAsset<'p, K> {
+    /// A key identifying this asset.
+    ///
+    /// This will typically be a relative logical path for the asset, but it
+    /// could be anything.
+    pub key: K,
+    /// A path to an existing file.
+    ///
+    /// Unlike `key`, this should be a valid file path.
     pub path: Cow<'p, std::path::Path>,
 }
 
 #[cfg(feature = "std")]
-impl<'p> FileAsset<'p> {
+impl<'p, K> FileAsset<'p, K> {
     #[inline]
-    pub fn new<P: Into<Cow<'p, std::path::Path>>>(path: P) -> Self {
-        Self { path: path.into() }
+    pub fn new<P: Into<Cow<'p, std::path::Path>>>(key: K, path: P) -> Self {
+        Self {
+            key,
+            path: path.into(),
+        }
+    }
+
+    pub fn into_buf(self) -> std::io::Result<BufAsset<'static, K>> {
+        let contents = std::fs::read(&self.path)?;
+        Ok(BufAsset {
+            key: self.key,
+            contents: contents.into(),
+        })
     }
 }
 
 #[cfg(feature = "std")]
-impl Process for FileAsset<'_> {
+impl<K> Process for FileAsset<'_, K> {
     type Error = std::io::Error;
     type Output = Vec<u8>;
 
@@ -155,7 +187,7 @@ impl Process for FileAsset<'_> {
 }
 
 #[cfg(feature = "std")]
-impl AssetExt for FileAsset<'_> {
+impl<K> AssetExt for FileAsset<'_, K> {
     #[cfg(feature = "mime")]
     #[inline]
     fn mime(&self) -> Option<mime::Mime> {
@@ -173,33 +205,98 @@ impl AssetExt for FileAsset<'_> {
     }
 }
 
-#[cfg(feature = "std")]
-pub enum Asset<'p, 'c> {
-    Buf(BufAsset<'p, 'c>),
-    File(FileAsset<'p>),
+#[derive(Debug, Clone)]
+pub enum Asset<'p, 'c, K> {
+    Buf(BufAsset<'c, K>),
+    #[cfg(feature = "std")]
+    File(FileAsset<'p, K>),
 }
 
-#[cfg(feature = "std")]
-impl<'p, 'c> Asset<'p, 'c> {
+impl<'p, 'c, K> Asset<'p, 'c, K> {
+    #[cfg(feature = "std")]
     #[inline]
-    pub fn new_file<P: Into<Cow<'p, std::path::Path>>>(path: P) -> Self {
-        Self::File(FileAsset::new(path))
-    }
-
-    #[inline]
-    pub fn new_buf<
-        P: Into<Cow<'p, std::path::Path>>,
-        C: Into<Cow<'c, [u8]>>,
-    >(
+    pub fn new_file<P: Into<Cow<'p, std::path::Path>>>(
+        key: K,
         path: P,
-        contents: C,
     ) -> Self {
-        Self::Buf(BufAsset::new(path, contents))
+        Self::File(FileAsset::new(key, path))
+    }
+
+    #[inline]
+    pub fn new_buf<C: Into<Cow<'c, [u8]>>>(key: K, contents: C) -> Self {
+        Self::Buf(BufAsset::new(key, contents))
+    }
+
+    #[inline]
+    pub const fn key(&self) -> &K {
+        match self {
+            Asset::Buf(BufAsset { key, .. }) => key,
+            #[cfg(feature = "std")]
+            Asset::File(FileAsset { key, .. }) => key,
+        }
+    }
+
+    #[cfg(feature = "std")]
+    #[inline]
+    pub const fn is_file(&self) -> bool {
+        matches!(self, Self::File(_))
+    }
+
+    #[inline]
+    pub const fn is_buf(&self) -> bool {
+        matches!(self, Self::Buf(_))
     }
 }
 
-#[cfg(feature = "std")]
-impl<'c> Process for Asset<'_, 'c> {
+impl<'p, 'c, K: Default> Asset<'p, 'c, K> {
+    pub fn into_buf(self) -> std::io::Result<BufAsset<'c, K>> {
+        match self {
+            Asset::Buf(buf) => Ok(buf),
+            Asset::File(file) => file.into_buf(),
+        }
+    }
+
+    pub fn ensure_buf(&mut self) -> std::io::Result<()> {
+        if let Asset::File(asset) = self {
+            let tmp = FileAsset {
+                key: Default::default(),
+                path: Default::default(),
+            };
+            let asset = mem::replace(asset, tmp);
+            *self = asset.into_buf()?.into();
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "std")]
+    pub fn into_file<P: Into<Cow<'p, std::path::Path>>>(
+        self,
+        path: P,
+    ) -> std::io::Result<FileAsset<'p, K>> {
+        match self {
+            Asset::Buf(buf) => buf.into_file(path),
+            Asset::File(file) => Ok(file),
+        }
+    }
+
+    #[cfg(feature = "std")]
+    pub fn ensure_file<P: Into<Cow<'p, std::path::Path>>>(
+        &mut self,
+        path: P,
+    ) -> std::io::Result<()> {
+        if let Asset::Buf(asset) = self {
+            let tmp = BufAsset {
+                key: Default::default(),
+                contents: Default::default(),
+            };
+            let asset = mem::replace(asset, tmp);
+            *self = asset.into_file(path)?.into();
+        }
+        Ok(())
+    }
+}
+
+impl<'c, K> Process for Asset<'_, 'c, K> {
     type Error = BoxError;
     type Output = Cow<'c, [u8]>;
 
@@ -208,6 +305,7 @@ impl<'c> Process for Asset<'_, 'c> {
             Asset::Buf(buf_asset) => {
                 buf_asset.process_full().map_err(Into::into)
             }
+            #[cfg(feature = "std")]
             Asset::File(file_asset) => file_asset
                 .process_full()
                 .map_err(Into::into)
@@ -217,7 +315,10 @@ impl<'c> Process for Asset<'_, 'c> {
 }
 
 #[cfg(feature = "std")]
-impl AssetExt for Asset<'_, '_> {
+impl<K> AssetExt for Asset<'_, '_, K>
+where
+    K: AsRef<std::path::Path>,
+{
     #[cfg(feature = "mime")]
     #[inline]
     fn mime(&self) -> Option<mime::Mime> {
@@ -241,6 +342,19 @@ impl AssetExt for Asset<'_, '_> {
             Asset::Buf(buf_asset) => buf_asset.size_hint(),
             Asset::File(file_asset) => file_asset.size_hint(),
         }
+    }
+}
+
+impl<'p, 'c, K> From<BufAsset<'c, K>> for Asset<'p, 'c, K> {
+    fn from(value: BufAsset<'c, K>) -> Self {
+        Self::Buf(value)
+    }
+}
+
+#[cfg(feature = "std")]
+impl<'p, 'c, K> From<FileAsset<'p, K>> for Asset<'p, 'c, K> {
+    fn from(value: FileAsset<'p, K>) -> Self {
+        Self::File(value)
     }
 }
 
@@ -270,6 +384,7 @@ impl<L: AssetExt, R: AssetExt> AssetExt for either::Either<L, R> {
         either::for_both!(*self, ref inner => inner.mime())
     }
 
+    #[cfg(feature = "std")]
     #[inline]
     fn path(&self) -> Option<&std::path::Path> {
         either::for_both!(*self, ref inner => inner.path())

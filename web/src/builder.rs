@@ -89,6 +89,11 @@ pub trait Builder {
     }
 
     /// Attempts to minify this asset based on its mime type.
+    #[cfg(any(
+        feature = "minify-js",
+        feature = "lightningcss",
+        feature = "minify-html"
+    ))]
     fn minify_or_fallback(self) -> Either<Minify<Self>, Self>
     where
         Self: Sized + AssetExt,
