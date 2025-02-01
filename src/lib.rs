@@ -345,14 +345,14 @@ where
     }
 }
 
-impl<'p, 'c, K> From<BufAsset<'c, K>> for Asset<'p, 'c, K> {
+impl<'c, K> From<BufAsset<'c, K>> for Asset<'_, 'c, K> {
     fn from(value: BufAsset<'c, K>) -> Self {
         Self::Buf(value)
     }
 }
 
 #[cfg(feature = "std")]
-impl<'p, 'c, K> From<FileAsset<'p, K>> for Asset<'p, 'c, K> {
+impl<'p, K> From<FileAsset<'p, K>> for Asset<'p, '_, K> {
     fn from(value: FileAsset<'p, K>) -> Self {
         Self::File(value)
     }
