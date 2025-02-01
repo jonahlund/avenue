@@ -122,6 +122,11 @@ impl<T: AssetExt> AssetExt for MinifyHtml<T> {
     }
 }
 
+#[cfg(any(
+    feature = "minify-js",
+    feature = "lightningcss",
+    feature = "minify-html"
+))]
 pub enum Minify<T> {
     #[cfg(feature = "minify-js")]
     Js(MinifyJs<T>),
@@ -131,6 +136,11 @@ pub enum Minify<T> {
     Html(MinifyHtml<T>),
 }
 
+#[cfg(any(
+    feature = "minify-js",
+    feature = "lightningcss",
+    feature = "minify-html"
+))]
 impl<T: Process> Process for Minify<T> {
     type Error = BoxError;
     type Output = Vec<u8>;
@@ -147,30 +157,44 @@ impl<T: Process> Process for Minify<T> {
     }
 }
 
+#[cfg(any(
+    feature = "minify-js",
+    feature = "lightningcss",
+    feature = "minify-html"
+))]
 impl<T: AssetExt> AssetExt for Minify<T> {
     #[inline]
     fn mime(&self) -> Option<mime::Mime> {
-        match self {
+        match *self {
+            #[cfg(feature = "minify-js")]
             Minify::Js(minify_js) => minify_js.mime(),
+            #[cfg(feature = "lightningcss")]
             Minify::Css(minify_css) => minify_css.mime(),
+            #[cfg(feature = "minify-html")]
             Minify::Html(minify_html) => minify_html.mime(),
         }
     }
 
     #[inline]
     fn path(&self) -> Option<&std::path::Path> {
-        match self {
+        match *self {
+            #[cfg(feature = "minify-js")]
             Minify::Js(minify_js) => minify_js.path(),
+            #[cfg(feature = "lightningcss")]
             Minify::Css(minify_css) => minify_css.path(),
+            #[cfg(feature = "minify-html")]
             Minify::Html(minify_html) => minify_html.path(),
         }
     }
 
     #[inline]
     fn size_hint(&self) -> Option<usize> {
-        match self {
+        match *self {
+            #[cfg(feature = "minify-js")]
             Minify::Js(minify_js) => minify_js.size_hint(),
+            #[cfg(feature = "lightningcss")]
             Minify::Css(minify_css) => minify_css.size_hint(),
+            #[cfg(feature = "minify-html")]
             Minify::Html(minify_html) => minify_html.size_hint(),
         }
     }
