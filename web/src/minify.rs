@@ -165,7 +165,7 @@ impl<T: Process> Process for Minify<T> {
 impl<T: AssetExt> AssetExt for Minify<T> {
     #[inline]
     fn mime(&self) -> Option<mime::Mime> {
-        match *self {
+        match self {
             #[cfg(feature = "minify-js")]
             Minify::Js(minify_js) => minify_js.mime(),
             #[cfg(feature = "lightningcss")]
@@ -177,7 +177,7 @@ impl<T: AssetExt> AssetExt for Minify<T> {
 
     #[inline]
     fn path(&self) -> Option<&std::path::Path> {
-        match *self {
+        match self {
             #[cfg(feature = "minify-js")]
             Minify::Js(minify_js) => minify_js.path(),
             #[cfg(feature = "lightningcss")]
@@ -189,7 +189,7 @@ impl<T: AssetExt> AssetExt for Minify<T> {
 
     #[inline]
     fn size_hint(&self) -> Option<usize> {
-        match *self {
+        match self {
             #[cfg(feature = "minify-js")]
             Minify::Js(minify_js) => minify_js.size_hint(),
             #[cfg(feature = "lightningcss")]
